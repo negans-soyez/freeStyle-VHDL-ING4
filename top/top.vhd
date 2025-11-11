@@ -70,18 +70,22 @@ architecture Behavioral of top is
 
     constant BALL_RADIUS   : integer := 6;
     constant BALL_XC_INIT  : integer := (SCREEN_WIDTH/2) - (PADDLE_WIDTH/2);
-    constant BALL_YC_INIT  : integer := FRAME_Y_END - 46;
+    constant BALL_YC_INIT  : integer := FRAME_Y_END - 70;
+	 
+	 
 
     --------------------------------------------------------------------
     -- Signaux balle, direction et paddle
     --------------------------------------------------------------------
     signal posX, next_posX : unsigned(9 downto 0) := to_unsigned(BALL_XC_INIT, 10);
     signal posY, next_posY : unsigned(9 downto 0) := to_unsigned(BALL_YC_INIT, 10);
-    signal dirX, next_dirX : integer range -1 to 1 := 0;
-    signal dirY, next_dirY : integer range -1 to 1 := -1;
+    signal dirX, next_dirX : integer range -2 to 2 := 0;
+    signal dirY, next_dirY : integer range -2 to 2 := -1;
     signal paddle_hit : std_logic;
     signal impact_offset : integer;
     signal paddle_x, next_paddle_x : integer := PADDLE_X_INIT;
+	 
+	 signal player_dead, next_player_dead : std_logic := '0';
 
 
     signal x, y : integer;
@@ -140,7 +144,7 @@ begin
     add2 <= std_logic_vector(unsigned(cpt2) + 1);
     mux  <= add when comp2 = '1' else cpt;
     comp  <= '1' when unsigned(mux) = 4 else '0';
-    comp2 <= '1' when unsigned(add2) = to_unsigned(200000, add2'length) else '0';
+    comp2 <= '1' when unsigned(add2) = to_unsigned(150000, add2'length) else '0';
     mux2 <= (others => '0') when comp = '1' else mux;
     mux3 <= (others => '0') when comp2 = '1' else add2;
     cpt  <= (others => '0') when reset = '1' else mux2 when rising_edge(clk50);
@@ -192,6 +196,16 @@ begin
     next_brick_alive <= '1' when reset = '1' else
                         '0' when brick_hit = '1' else
                         brick_alive;
+								
+	 --------------------------------------------------------------------
+    -- Gestion de la mort du joueur
+    --------------------------------------------------------------------
+	next_player_dead <= 
+		 '0' when reset = '1' elsE
+		 '1' when (to_integer(posY) > FRAME_Y_END) else
+		 player_dead;
+
+
 
 	--------------------------------------------------------------------
 	-- Direction et position de la balle (sans demi-vitesse)
@@ -215,24 +229,26 @@ begin
 	-- Calcul de la direction verticale
 	next_dirY <= 
 		 -1 when reset = '1' else
-		 -- rebond sur le haut, bas, raquette ou brique
+		 -- rebond sur le haut, raquette ou brique
 		 -dirY when (
-			  (to_integer(posY) >= FRAME_Y_END - BALL_RADIUS and dirY > 0) or
 			  (to_integer(posY) <= FRAME_Y_START + BALL_RADIUS and dirY < 0) or
 			  (paddle_hit = '1') or
 			  (brick_hit = '1' and hit_side = "10")
 		 ) else
 		 dirY;
 
-	-- Position horizontale
-	next_posX <= to_unsigned(BALL_XC_INIT, 10) when reset = '1' else
-					 to_unsigned(to_integer(posX) + dirX, 10) when (comp = '1') else
-					 posX;
+    -- Position horizontale
+    next_posX <= to_unsigned(BALL_XC_INIT, 10) when reset = '1' else
+                 posX when player_dead = '1' else
+                 to_unsigned(to_integer(posX) + dirX, 10) when (comp = '1') else
+                 posX;
 
-	-- Position verticale
-	next_posY <= to_unsigned(BALL_YC_INIT, 10) when reset = '1' else
-					 to_unsigned(to_integer(posY) + dirY, 10) when (comp = '1') else
-					 posY;
+    -- Position verticale
+    next_posY <= to_unsigned(BALL_YC_INIT, 10) when reset = '1' else
+                 posY when player_dead = '1' else
+                 to_unsigned(to_integer(posY) + dirY, 10) when (comp = '1') else
+                 posY;
+
 
 
 
@@ -245,6 +261,8 @@ begin
     dirX <= next_dirX when rising_edge(clk50);
     dirY <= next_dirY when rising_edge(clk50);
     brick_alive <= next_brick_alive when rising_edge(clk50);
+	 player_dead <= next_player_dead when rising_edge(clk50);
+
 
     --------------------------------------------------------------------
     -- Dessin cadre, paddle, brique et balle
@@ -269,7 +287,7 @@ begin
             y >= 260 and y < 260 + BRICK_HEIGHT
         )
         else "1111" when (
-            beamValid='1' and
+            beamValid='1' and player_dead = '0' and
             ((x - to_integer(posX))*(x - to_integer(posX)) +
              (y - to_integer(posY))*(y - to_integer(posY))) <= BALL_RADIUS*BALL_RADIUS
         )

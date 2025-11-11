@@ -52,26 +52,25 @@ architecture Behavioral of top is
     -- Constantes d’affichage
     --------------------------------------------------------------------
     constant SCREEN_WIDTH  : integer := 640;
-	constant SCREEN_HEIGHT : integer := 480;
-	constant FRAME_SIZE    : integer := 400;
+    constant SCREEN_HEIGHT : integer := 480;
+    constant FRAME_SIZE    : integer := 400;
 
-	constant FRAME_X_START : integer := (SCREEN_WIDTH  - FRAME_SIZE)/2;
-	constant FRAME_Y_START : integer := (SCREEN_HEIGHT - FRAME_SIZE)/2;
-	constant FRAME_X_END   : integer := FRAME_X_START + FRAME_SIZE;
-	constant FRAME_Y_END   : integer := FRAME_Y_START + FRAME_SIZE;
+    constant FRAME_X_START : integer := (SCREEN_WIDTH  - FRAME_SIZE)/2;
+    constant FRAME_Y_START : integer := (SCREEN_HEIGHT - FRAME_SIZE)/2;
+    constant FRAME_X_END   : integer := FRAME_X_START + FRAME_SIZE;
+    constant FRAME_Y_END   : integer := FRAME_Y_START + FRAME_SIZE;
 
-	constant PADDLE_WIDTH  : integer := 80;
-	constant PADDLE_HEIGHT : integer := 10;
-	constant PADDLE_Y      : integer := FRAME_Y_END - 30;
-	constant PADDLE_X_INIT : integer := (SCREEN_WIDTH/2) - (PADDLE_WIDTH/2);
+    constant PADDLE_WIDTH  : integer := 80;
+    constant PADDLE_HEIGHT : integer := 10;
+    constant PADDLE_Y      : integer := FRAME_Y_END - 30;
+    constant PADDLE_X_INIT : integer := (SCREEN_WIDTH/2) - (PADDLE_WIDTH/2);
 
-	constant BRICK_WIDTH   : integer := 30;
-	constant BRICK_HEIGHT  : integer := 10;
+    constant BRICK_WIDTH   : integer := 30;
+    constant BRICK_HEIGHT  : integer := 10;
 
-	constant BALL_RADIUS   : integer := 6;
-	constant BALL_XC_INIT  : integer := (SCREEN_WIDTH / 2);
-	constant BALL_YC_INIT  : integer := 200;
-
+    constant BALL_RADIUS   : integer := 6;
+    constant BALL_XC_INIT  : integer := (SCREEN_WIDTH/2) - (PADDLE_WIDTH/2);
+    constant BALL_YC_INIT  : integer := FRAME_Y_END - 46;
 
     --------------------------------------------------------------------
     -- Signaux balle, direction et paddle
@@ -83,6 +82,8 @@ architecture Behavioral of top is
     signal paddle_hit : std_logic;
     signal impact_offset : integer;
     signal paddle_x, next_paddle_x : integer := PADDLE_X_INIT;
+
+
     signal x, y : integer;
 
     --------------------------------------------------------------------
@@ -96,8 +97,10 @@ architecture Behavioral of top is
     -- Brique
     --------------------------------------------------------------------
     signal brick_alive : std_logic := '1';
-    signal brick_hit : std_logic;
+    signal next_brick_alive : std_logic;
+    signal brick_hit : std_logic := '0';
     signal hit_side : std_logic_vector(1 downto 0);
+	 
 
 begin
 
@@ -137,7 +140,7 @@ begin
     add2 <= std_logic_vector(unsigned(cpt2) + 1);
     mux  <= add when comp2 = '1' else cpt;
     comp  <= '1' when unsigned(mux) = 4 else '0';
-    comp2 <= '1' when unsigned(add2) = to_unsigned(100000, add2'length) else '0';
+    comp2 <= '1' when unsigned(add2) = to_unsigned(200000, add2'length) else '0';
     mux2 <= (others => '0') when comp = '1' else mux;
     mux3 <= (others => '0') when comp2 = '1' else add2;
     cpt  <= (others => '0') when reset = '1' else mux2 when rising_edge(clk50);
@@ -186,42 +189,62 @@ begin
         abs((to_integer(posX) - BALL_RADIUS) - 320) < 4
     ) else "00";
 
-    brick_alive <= '0' when (brick_hit = '1' and rising_edge(clk50)) else brick_alive;
+    next_brick_alive <= '1' when reset = '1' else
+                        '0' when brick_hit = '1' else
+                        brick_alive;
+
+	--------------------------------------------------------------------
+	-- Direction et position de la balle (sans demi-vitesse)
+	--------------------------------------------------------------------
+	-- Calcul de la direction horizontale
+	next_dirX <= 
+		 0 when reset = '1' else
+		 -- rebond sur les bords gauche/droite ou sur brique
+		 -dirX when (
+			  (to_integer(posX) >= FRAME_X_END - BALL_RADIUS and dirX > 0) or
+			  (to_integer(posX) <= FRAME_X_START + BALL_RADIUS and dirX < 0) or
+			  (brick_hit = '1' and hit_side = "01")
+		 ) else
+		 -- rebond sur la raquette selon la zone d’impact
+		 -2 when (paddle_hit = '1' and impact_offset < -20) else   -- fort angle gauche
+		 -1 when (paddle_hit = '1' and impact_offset < -10) else   -- moyen gauche
+		  1 when (paddle_hit = '1' and impact_offset > 10) else    -- moyen droite
+		  2 when (paddle_hit = '1' and impact_offset > 20) else    -- fort angle droite
+		  dirX;
+
+	-- Calcul de la direction verticale
+	next_dirY <= 
+		 -1 when reset = '1' else
+		 -- rebond sur le haut, bas, raquette ou brique
+		 -dirY when (
+			  (to_integer(posY) >= FRAME_Y_END - BALL_RADIUS and dirY > 0) or
+			  (to_integer(posY) <= FRAME_Y_START + BALL_RADIUS and dirY < 0) or
+			  (paddle_hit = '1') or
+			  (brick_hit = '1' and hit_side = "10")
+		 ) else
+		 dirY;
+
+	-- Position horizontale
+	next_posX <= to_unsigned(BALL_XC_INIT, 10) when reset = '1' else
+					 to_unsigned(to_integer(posX) + dirX, 10) when (comp = '1') else
+					 posX;
+
+	-- Position verticale
+	next_posY <= to_unsigned(BALL_YC_INIT, 10) when reset = '1' else
+					 to_unsigned(to_integer(posY) + dirY, 10) when (comp = '1') else
+					 posY;
+
+
+
 
     --------------------------------------------------------------------
-    -- Direction et position de la balle
+    -- Registres synchrones
     --------------------------------------------------------------------
-    next_dirX <= 
-        0 when reset = '1' else
-        -dirX when (
-            (to_integer(posX) >= FRAME_X_END - BALL_RADIUS and dirX > 0) or
-            (to_integer(posX) <= FRAME_X_START + BALL_RADIUS and dirX < 0) or
-            (brick_hit = '1' and hit_side = "01")
-        ) else
-        -1 when (paddle_hit = '1' and impact_offset < -10) else
-         1 when (paddle_hit = '1' and impact_offset > 10) else
-        dirX;
-
-    next_dirY <= 
-        -1 when reset = '1' else
-        -dirY when (
-            (to_integer(posY) >= FRAME_Y_END - BALL_RADIUS and dirY > 0) or
-            (to_integer(posY) <= FRAME_Y_START + BALL_RADIUS and dirY < 0) or
-            (paddle_hit = '1') or
-            (brick_hit = '1' and hit_side = "10")
-        ) else
-        dirY;
-
-    next_posX <= to_unsigned(BALL_XC_INIT, 10) when reset = '1' else
-                 to_unsigned(to_integer(posX) + dirX, 10) when (comp = '1') else posX;
-
-    next_posY <= to_unsigned(BALL_YC_INIT, 10) when reset = '1' else
-                 to_unsigned(to_integer(posY) + dirY, 10) when (comp = '1') else posY;
-
     posX <= next_posX when rising_edge(clk50);
     posY <= next_posY when rising_edge(clk50);
     dirX <= next_dirX when rising_edge(clk50);
     dirY <= next_dirY when rising_edge(clk50);
+    brick_alive <= next_brick_alive when rising_edge(clk50);
 
     --------------------------------------------------------------------
     -- Dessin cadre, paddle, brique et balle
@@ -241,8 +264,7 @@ begin
             y >= PADDLE_Y and y < PADDLE_Y + PADDLE_HEIGHT
         )
         else "1111" when (
-            beamValid='1' and
-            brick_alive = '1' and
+            beamValid='1' and brick_alive = '1' and
             x >= 320 - BRICK_WIDTH and x < 320 and
             y >= 260 and y < 260 + BRICK_HEIGHT
         )
@@ -258,7 +280,7 @@ begin
     --------------------------------------------------------------------
     gSig_int <=
         "0000" when (
-            beamValid='1' and
+            beamValid='1' and brick_alive = '1' and
             x >= 320 - BRICK_WIDTH and x < 320 and
             y >= 260 and y < 260 + BRICK_HEIGHT
         )
